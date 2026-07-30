@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mojo-konlpy"
+version = "0.1.0"
+description = "Mojo-accelerated Korean morphological analysis compatible with KoNLPy Okt"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26"]
+license = {file = "LICENSE"}
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-data]
+mojo_konlpy = ["data/*"]

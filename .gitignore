@@ -1,0 +1,11 @@
+.pixi/
+dist/
+build/*.o
+__pycache__/
+*.so
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+core.*
+hs_err_pid*.log
