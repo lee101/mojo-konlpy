@@ -1,5 +1,7 @@
 """Open Korean Text morphology search exposed through a stable C ABI."""
 
+from std.sys import simd_width_of
+
 comptime I64Ptr = UnsafePointer[Int64, AnyOrigin[mut=True]]
 comptime U64Ptr = UnsafePointer[UInt64, AnyOrigin[mut=True]]
 comptime F64Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
@@ -236,11 +238,27 @@ def mkl_analyze(
     # det/excl/initial/preferred/ha/mismatch/first_pos/prev_pos/prev/tok_start/
     # tok_end/tok_pos/tok_unknown.
     comptime NF = 21
-    for i in range(slots * NF):
+    comptime W = simd_width_of[DType.float64]()
+    var integer = 0
+    var zero_i = SIMD[DType.int64, W](0)
+    while integer + W <= slots * NF:
+        si.store[width=W, alignment=1](integer, zero_i)
+        integer += W
+    while integer < slots * NF:
+        si[integer] = 0
+        integer += 1
+    var i = 0
+    var max_f = SIMD[DType.float64, W](1.7976931348623157e308)
+    var zero_f = SIMD[DType.float64, W](0.0)
+    while i + W <= slots:
+        sf.store[width=W, alignment=1](i, max_f)
+        sf.store[width=W, alignment=1](slots + i, zero_f)
+        i += W
+    while i < slots:
         si[i] = 0
-    for i in range(slots):
         sf[i] = 1.7976931348623157e308
         sf[slots + i] = 0.0
+        i += 1
     si[0] = 1
     si[slots] = 0
     si[2 * slots] = 1

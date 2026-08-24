@@ -58,6 +58,9 @@ class _Lexicon:
             or self.freqs.size != self.capacity
         ):
             raise RuntimeError("invalid lexicon table dimensions")
+        self.keys_addr = address(self.keys)
+        self.masks_addr = address(self.masks)
+        self.freqs_addr = address(self.freqs)
         self._stems: dict[tuple[int, str], str] | None = None
         self._typos: list[tuple[str, str]] | None = None
 
@@ -196,7 +199,8 @@ def _collapse_nouns(tokens: list[_Token]) -> list[_Token]:
     return result
 
 
-def _analyze_korean(text: str, offset: int) -> list[_Token]:
+@lru_cache(maxsize=16_384)
+def _analyze_korean_layout(text: str) -> tuple[tuple[str, int, int, bool], ...]:
     lexicon = _get_lexicon()
     chars = np.fromiter(map(ord, text), dtype=np.int64, count=len(text))
     n = len(text)
@@ -208,8 +212,8 @@ def _analyze_korean(text: str, offset: int) -> list[_Token]:
     scratch_i = np.empty(slots * 21, dtype=np.int64)
     scratch_f = np.empty(slots * 2, dtype=np.float64)
     count = int(library().mkl_analyze(
-        address(chars), n, address(lexicon.keys), address(lexicon.masks),
-        address(lexicon.freqs), lexicon.capacity, address(starts), address(ends),
+        address(chars), n, lexicon.keys_addr, lexicon.masks_addr,
+        lexicon.freqs_addr, lexicon.capacity, address(starts), address(ends),
         address(poses), address(unknowns), n, address(scratch_i), scratch_i.size,
         address(scratch_f), scratch_f.size,
     ))
@@ -222,25 +226,37 @@ def _analyze_korean(text: str, offset: int) -> list[_Token]:
         raise RuntimeError(
             f"Mojo morphology kernel returned {count} tokens for {n} characters"
         )
-    if not (
-        np.all(starts[:count] >= 0)
-        and np.all(ends[:count] <= n)
-        and np.all(starts[:count] < ends[:count])
-        and np.all(starts[:count] <= ends[:count])
-        and np.all((poses[:count] >= 0) & (poses[:count] < len(POS_NAMES)))
-        and np.all((unknowns[:count] == 0) | (unknowns[:count] == 1))
-    ):
-        raise RuntimeError("Mojo morphology kernel returned invalid token metadata")
+    for i in range(count):
+        start = int(starts[i])
+        end = int(ends[i])
+        pos = int(poses[i])
+        unknown = int(unknowns[i])
+        if not (
+            0 <= start < end <= n
+            and 0 <= pos < len(POS_NAMES)
+            and unknown in (0, 1)
+        ):
+            raise RuntimeError("Mojo morphology kernel returned invalid token metadata")
     tokens = [
         _Token(
             text[int(starts[i]):int(ends[i])],
             int(poses[i]),
-            offset + int(starts[i]),
+            int(starts[i]),
             bool(unknowns[i]),
         )
         for i in range(count)
     ]
-    return _collapse_nouns(tokens)
+    return tuple(
+        (token.text, token.pos, token.offset, token.unknown)
+        for token in _collapse_nouns(tokens)
+    )
+
+
+def _analyze_korean(text: str, offset: int) -> list[_Token]:
+    return [
+        _Token(surface, pos, offset + relative_offset, unknown)
+        for surface, pos, relative_offset, unknown in _analyze_korean_layout(text)
+    ]
 
 
 def _stem_tokens(tokens: list[_Token], use_stem: bool) -> list[_Token]:

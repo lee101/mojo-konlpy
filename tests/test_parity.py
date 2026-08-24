@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from mojo_konlpy._lib import address, library
-from mojo_konlpy.tag import Okt, _normalize_korean_chunk
+from mojo_konlpy.tag import Okt, _analyze_korean_layout, _normalize_korean_chunk
 
 konlpy_tag = pytest.importorskip("konlpy.tag")
 
@@ -89,6 +89,24 @@ def test_normalize_reuses_repeated_chunks(analyzers):
     cache = _normalize_korean_chunk.cache_info()
     assert cache.misses == 1
     assert cache.hits == 2
+
+
+def test_morphology_reuses_repeated_chunks(analyzers):
+    ours, upstream = analyzers
+    text = "대한민국 대한민국 대한민국"
+    _analyze_korean_layout.cache_clear()
+    assert ours.pos(text) == upstream.pos(text)
+    cache = _analyze_korean_layout.cache_info()
+    assert cache.misses == 1
+    assert cache.hits == 2
+
+
+@pytest.mark.parametrize("length", range(1, 11))
+def test_simd_initialization_vector_and_tail_parity(analyzers, length):
+    ours, upstream = analyzers
+    text = "가" * length
+    _analyze_korean_layout.cache_clear()
+    assert ours.pos(text) == upstream.pos(text)
 
 
 def test_join_parity(analyzers):

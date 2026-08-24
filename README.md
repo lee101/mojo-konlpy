@@ -89,25 +89,29 @@ faster.
 
 | workload | mojo-konlpy | KoNLPy | upstream / Mojo |
 |---|---:|---:|---:|
-| pos, 400 short sentences | 146.74 ms | 311.27 ms | 2.12x |
-| pos, 100-sentence paragraph | 228.74 ms | 277.41 ms | 1.21x |
-| pos(norm=True, stem=True), 400 calls | 154.44 ms | 589.29 ms | 3.82x |
-| normalize, 3,100 noisy characters | 0.49 ms | 46.27 ms | 93.59x |
-| phrases, 400 calls | 191.24 ms | 418.70 ms | 2.19x |
+| pos, 400 short sentences | 13.07 ms | 269.42 ms | 20.61x |
+| pos, 100-sentence paragraph | 9.75 ms | 123.25 ms | 12.64x |
+| pos(norm=True, stem=True), 400 calls | 14.96 ms | 511.13 ms | 34.16x |
+| normalize, 3,100 noisy characters | 0.30 ms | 28.49 ms | 96.19x |
+| phrases, 400 calls | 43.89 ms | 268.62 ms | 6.12x |
 
 These numbers describe this machine and workload, not a universal speedup.
 Run `pixi run bench` for local results; the Pixi task takes a machine-wide
 benchmark lock.
 
-There is no SIMD, threaded, or GPU normalization path. Its hot work is
-variable-length Unicode matching, data-dependent substitution, and irregular
-hash-table probing rather than a contiguous numeric loop. Splitting the small
-chunks across threads costs more than the cached work, while converting them to
-numeric device buffers would add allocation, copies, and transfer overhead to a
-low-arithmetic-intensity kernel. The morphology search is likewise
-branch-heavy, state-dependent, and irregular. A GPU path would lose, so the
-package remains CPU-only and does not allocate device memory or depend on
-`max`.
+Native scratch initialization uses unaligned SIMD stores with a scalar tail;
+unaligned access is required because the buffers are NumPy-owned. Morphology
+results are cached as bounded, immutable, offset-independent layouts, avoiding
+repeat native calls and temporary buffers while preserving caller-specific
+token offsets. The FFI still receives NumPy-owned contiguous buffers directly.
+
+There is no threaded or GPU path. The hot semantic work is variable-length
+Unicode matching, data-dependent substitution, irregular hash-table probing,
+and a state-dependent Viterbi search rather than a contiguous numeric kernel.
+After caching, the independent misses are too small for thread launch overhead,
+and the arithmetic intensity is well below the level that could repay device
+allocation, copies, and transfer. A GPU path would lose, so the package remains
+CPU-only, allocates no device memory, and does not depend on `max`.
 
 ## How it works
 
