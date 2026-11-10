@@ -146,12 +146,55 @@ host (load average 70-96 during measurement):
 
 The package stays CPU-only and single-threaded, allocates no device memory,
 and does not depend on `max`. There is no serial/parallel equivalence test
-because there is no parallel path to compare. A GPU path is not taken for the
-same reason plus the arithmetic-intensity test: the working set is scattered
-table reads well under 2 flops per byte. If a caller ever needs a
+because there is no parallel path to compare. If a caller ever needs a
 multi-thousand character Hangul run, parallelising that chunk's edge scan,
 not the whole call, is the shape that could work; it needs its own benchmark
 before it ships.
+
+## GPU
+
+**CPU only: memory-bound.**
+
+A GPU phase was gated and stopped before any kernel was written. Both host
+checks passed, so the decision rests only on the arithmetic-intensity gate:
+
+| gate | result |
+|---|---|
+| GPU free memory (`nvidia-smi --query-gpu=memory.free`) | 4559 MiB free on an RTX 5090 (32 GB). Above the 4000 MiB floor, so not skipped on capacity. |
+| Arithmetic intensity of `mkl_analyze` | **0.23-0.39 flops per byte at every size measured.** Below the 2 flops/byte candidate threshold. |
+
+Measurement method: `bench/analysis.md` did not exist in this checkout, so the
+ratio was measured rather than estimated. `src/konlpy.mojo` was compiled into a
+standalone native binary (same code, no `ctypes` hop) and profiled under
+`valgrind --tool=callgrind --cache-sim=yes`, subtracting a zero-call baseline to
+isolate the kernel. `perf` is unavailable here (`perf_event_paranoid=4`).
+
+| chunk length | kernel instructions | memory references | instructions per byte |
+|---:|---:|---:|---:|
+| 8 | 74,975 | 40,898 | 0.23 |
+| 112 | 4,613,102 | 1,506,056 | 0.38 |
+| 400 | 17,161,471 | 5,561,727 | 0.39 |
+
+The ratio does not improve with size: per-character cost saturates at about
+41,000-43,000 instructions and 13,000-14,000 references, because each position
+does a fixed amount of bookkeeping over a compact table. This is table-driven
+bookkeeping, not dense arithmetic, which is why it sits an order of magnitude
+below the threshold instead of near it.
+
+Two further facts, recorded because they would block a GPU path even if the
+ratio had passed:
+
+- **The kernel is a sequential left-to-right DP.** Each `end` position reads
+  only rows for `start < end` written earlier in the same call, so the grid
+  cannot spread over output positions. A device kernel would serialise the same
+  way, giving up the only parallelism a GPU offers.
+- **The lexicon is 24 MiB and read by random probe.** It would have to be
+  resident on the device, and a cold upload is around 419 us at a nominal
+  60 GB/s, against a whole 3-character call cost of 35 us on this host.
+
+No device memory is allocated, no GPU test is added, and no GPU numbers are
+quoted. A GPU test would have been written to skip on a CPU-only host; there is
+no such test because there is no GPU path to test.
 
 ## How it works
 
