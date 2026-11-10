@@ -75,6 +75,12 @@ legal prose. It also checks the repeated-chunk normalization cache and rejects
 invalid FFI buffers. Assertions compare complete token/POS or phrase sequences;
 they are not smoke tests.
 
+Of the suite's 59 test cases, 54 call KoNLPy and compare its output; the other
+five exercise the port's FFI validation, the shared library's exported symbol,
+and constructor arguments. The suite is evidence of parity on the inputs it
+contains, not of parity beyond them: the `하지 겟` shape described under
+Benchmarks fails parity and is not covered here.
+
 ```bash
 pixi run build
 pixi run test
@@ -84,20 +90,53 @@ pixi run test
 
 Measured with `pixi run bench` on an Intel Xeon E5-2697 v4 at 2.30GHz using
 Python 3.13.14. Times are the best of five warm runs. Each benchmark first
-asserts complete output equality with KoNLPy. Ratios above 1 mean this port is
-faster.
+asserts complete output equality with KoNLPy, and both sides consume the same
+input objects. Ratios above 1 mean this port is faster. Every row below was
+re-measured in a verification session; see [bench/verify.md](bench/verify.md)
+for what reproduced and what did not.
 
 | workload | mojo-konlpy | KoNLPy | upstream / Mojo |
 |---|---:|---:|---:|
-| pos, 400 short sentences | 13.20 ms | 284.63 ms | 21.57x |
-| pos, 100-sentence paragraph | 10.07 ms | 132.48 ms | 13.16x |
-| pos(norm=True, stem=True), 400 calls | 15.65 ms | 517.66 ms | 33.07x |
-| normalize, 3,100 noisy characters | 0.30 ms | 23.96 ms | 80.99x |
-| phrases, 400 calls | 47.46 ms | 291.09 ms | 6.13x |
+| pos, 400 short sentences | 13.25 ms | 293.90 ms | 22.18x |
+| pos, 100-sentence paragraph | 10.45 ms | 145.80 ms | 13.95x |
+| pos(norm=True, stem=True), 400 calls | 16.00 ms | 567.89 ms | 35.49x |
+| normalize, 3,100 noisy characters | 0.30 ms | 24.40 ms | 82.33x |
+| normalize(norm path via pos), 400 calls | 14.81 ms | 518.99 ms | 35.05x |
+| normalize, 2,600 distinct Hangul characters | 0.05 ms | 14,308 ms | 286,160x |
+| phrases, 400 calls | 47.11 ms | 280.88 ms | 5.96x |
+
+Two of these rows depend on behaviour worth stating plainly, because the
+first is where the reference implementation stops doing comparable work:
+
+- **`normalize`, 3,100 noisy characters.** The input repeats five distinct
+  Korean chunks 100 times, and both sides cache per chunk, so 100 of this
+  row's 100 normalizations are cache hits on both sides. The ratio measured
+  here ranged from 44x to 91x across runs.
+- **`normalize`, 2,600 distinct Hangul characters.** Upstream's JVM
+  recompiles its normalizer on calls whose argument list differs from the
+  previous call, and after a warm-up call it was still taking 14,308 ms from
+  the same JVM on the same input, against 0.05 ms here. Treat the ratio as a
+  JVM pathology, not a portable speedup. On the first call into a fresh
+  process the ratio was 455x.
 
 These numbers describe this machine and workload, not a universal speedup.
+The host is shared; load average was 26 to 125 during measurement, so
+individual rows moved by up to about 20% between runs.
+
 Run `pixi run bench` for local results; the Pixi task takes a machine-wide
 benchmark lock.
+
+Every ratio above holds on identical input with real work on both sides:
+`bench.py` builds each input once, runs the same operations through both
+libraries, and aborts if outputs differ.
+
+One parity failure surfaced during verification and is not hidden by these
+rows: with a space between the stem and ending,
+`pos("하지 겟")` returns `[("하지겟", "Verb")]` here but
+`[("하지", "Verb"), ("겟", "PreEomi")]` in KoNLPy (similarly for
+`"먹지 겟"`, and with `norm=True` or `stem=True`). No benchmark row uses
+such an input. Reproduce with `pixi run python bench/verify_parity_bug.py`;
+the fix is not in this branch.
 
 `pixi run python bench/analysis.py` records the measurements behind the
 decision below (kernel cost by chunk length and the chunk sizes real callers

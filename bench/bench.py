@@ -49,6 +49,9 @@ def main() -> None:
     ] * 100
     paragraph = (sentence + " ") * 100
 
+    divergent = [f"{noisy} {chr(0xAC00 + i)}" for i in range(200)]
+    noisy_boundary = "".join(chr(0xAC00 + i) for i in range(2600))
+
     cases = [
         (
             "pos, 400 short sentences",
@@ -70,6 +73,16 @@ def main() -> None:
             lambda: ours.normalize(noisy),
             lambda: upstream.normalize(noisy),
         ),
+        (
+            "normalize(norm path via pos), 400 calls",
+            lambda: [ours.pos(text, norm=True) for text in short_batch],
+            lambda: [upstream.pos(text, norm=True) for text in short_batch],
+        ),        (
+            "normalize, 2,600 distinct Hangul characters",
+            lambda: ours.normalize(noisy_boundary),
+            lambda: upstream.normalize(noisy_boundary),
+        ),
+
         (
             "phrases, 400 calls",
             lambda: [ours.phrases(text) for text in short_batch],
